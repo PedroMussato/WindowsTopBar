@@ -3,7 +3,7 @@
 A tiny macOS-style top bar for Windows that always shows the **date, time and battery level**, so you never have to hover an auto-hidden taskbar to see them.
 
 ```
-Nov 23 2026  •  21:59  •  ⚡ 87%
+Monday, November 23, 2026  •  21:59  •  ⚡ 87%
 ```
 
 ## Features

@@ -418,7 +418,7 @@ namespace TopBar
         {
             DateTime now = DateTime.Now;
             List<string> parts = new List<string>();
-            parts.Add(now.ToString("MMM d yyyy", CultureInfo.InvariantCulture));
+            parts.Add(now.ToString("dddd, MMMM d, yyyy", CultureInfo.InvariantCulture));
             if (settings.ShowTime)
             {
                 parts.Add(now.ToString(settings.Use24Hour ? "HH:mm" : "h:mm tt", CultureInfo.InvariantCulture));
