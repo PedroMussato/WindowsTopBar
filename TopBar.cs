@@ -39,6 +39,7 @@ namespace TopBar
     {
         public bool Use24Hour = true;
         public bool ShowTime = true;
+        public bool ShowCamera = true;
         public bool Fresh;
 
         static string Dir
@@ -65,6 +66,7 @@ namespace TopBar
                     bool val = line.Substring(i + 1).Trim().ToLowerInvariant() == "true";
                     if (key == "Use24Hour") s.Use24Hour = val;
                     else if (key == "ShowTime") s.ShowTime = val;
+                    else if (key == "ShowCamera") s.ShowCamera = val;
                 }
             }
             catch { }
@@ -78,7 +80,8 @@ namespace TopBar
                 Directory.CreateDirectory(Dir);
                 File.WriteAllLines(FilePath, new string[] {
                     "Use24Hour=" + Use24Hour.ToString().ToLowerInvariant(),
-                    "ShowTime=" + ShowTime.ToString().ToLowerInvariant()
+                    "ShowTime=" + ShowTime.ToString().ToLowerInvariant(),
+                    "ShowCamera=" + ShowCamera.ToString().ToLowerInvariant()
                 });
             }
             catch { }
@@ -174,6 +177,8 @@ namespace TopBar
         readonly int barHeight;
         string text = "";
         bool registered;
+        bool showCamera;
+        bool cameraOn;
 
         public BarForm(Screen screen)
         {
@@ -214,6 +219,14 @@ namespace TopBar
         {
             if (t == text) return;
             text = t;
+            Invalidate();
+        }
+
+        public void SetCamera(bool show, bool on)
+        {
+            if (show == showCamera && on == cameraOn) return;
+            showCamera = show;
+            cameraOn = on;
             Invalidate();
         }
 
@@ -295,13 +308,37 @@ namespace TopBar
         {
             Graphics g = e.Graphics;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            using (StringFormat sf = new StringFormat())
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (StringFormat sf = new StringFormat(StringFormat.GenericTypographic))
             {
-                sf.Alignment = StringAlignment.Center;
+                sf.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoWrap;
                 sf.LineAlignment = StringAlignment.Center;
+
+                // Layout: "<main text>  •  ● Camera", centered as one line.
+                string left = showCamera ? text + "  \u2022  " : text;
+                string label = "Camera";
+                float leftW = g.MeasureString(left, font, 10000, sf).Width;
+                float labelW = showCamera ? g.MeasureString(label, font, 10000, sf).Width : 0f;
+                float dot = font.Height * 0.5f;
+                float gap = font.Height * 0.3f;
+                float total = leftW + (showCamera ? dot + gap + labelW : 0f);
+                float x = (Width - total) / 2f;
+                float h = Height - 1;
+
                 using (Brush b = new SolidBrush(Color.FromArgb(240, 240, 240)))
                 {
-                    g.DrawString(text, font, b, new RectangleF(0, 0, Width, Height), sf);
+                    g.DrawString(left, font, b, new RectangleF(x, 0, leftW + 4, h), sf);
+                    if (showCamera)
+                    {
+                        float dx = x + leftW;
+                        float dy = (h - dot) / 2f;
+                        Color c = cameraOn ? Color.FromArgb(52, 199, 89) : Color.FromArgb(255, 69, 58);
+                        using (Brush cb = new SolidBrush(c))
+                        {
+                            g.FillEllipse(cb, dx, dy, dot, dot);
+                        }
+                        g.DrawString(label, font, b, new RectangleF(dx + dot + gap, 0, labelW + 4, h), sf);
+                    }
                 }
             }
             // Subtle separator line along the bottom edge.
@@ -330,7 +367,7 @@ namespace TopBar
         readonly NotifyIcon tray = new NotifyIcon();
         volatile bool needRebuild;
 
-        ToolStripMenuItem item24, item12, itemShowTime, itemStartup;
+        ToolStripMenuItem item24, item12, itemShowTime, itemCamera, itemStartup;
 
         public BarContext()
         {
@@ -360,6 +397,7 @@ namespace TopBar
             item24 = new ToolStripMenuItem("24-hour clock");
             item12 = new ToolStripMenuItem("12-hour clock");
             itemShowTime = new ToolStripMenuItem("Show time");
+            itemCamera = new ToolStripMenuItem("Show camera status");
             itemStartup = new ToolStripMenuItem("Start with Windows");
             ToolStripMenuItem exit = new ToolStripMenuItem("Exit");
 
@@ -367,12 +405,14 @@ namespace TopBar
             item12.Click += delegate { settings.Use24Hour = false; SaveAndRefresh(); };
             itemShowTime.Click += delegate { settings.ShowTime = !settings.ShowTime; SaveAndRefresh(); };
             itemStartup.Click += delegate { Startup.Set(!Startup.IsEnabled()); SaveAndRefresh(); };
+            itemCamera.Click += delegate { settings.ShowCamera = !settings.ShowCamera; SaveAndRefresh(); };
             exit.Click += delegate { ExitThread(); };
 
             menu.Items.Add(item24);
             menu.Items.Add(item12);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(itemShowTime);
+            menu.Items.Add(itemCamera);
             menu.Items.Add(itemStartup);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(exit);
@@ -390,6 +430,7 @@ namespace TopBar
             item24.Checked = settings.Use24Hour;
             item12.Checked = !settings.Use24Hour;
             itemShowTime.Checked = settings.ShowTime;
+            itemCamera.Checked = settings.ShowCamera;
             itemStartup.Checked = Startup.IsEnabled();
         }
 
@@ -409,6 +450,7 @@ namespace TopBar
             {
                 BarForm bar = new BarForm(s);
                 bar.SetText(t);
+                bar.SetCamera(settings.ShowCamera, settings.ShowCamera && CameraInUse());
                 bars.Add(bar);
                 bar.Start();
             }
@@ -436,6 +478,49 @@ namespace TopBar
             return string.Join("  \u2022  ", parts.ToArray());
         }
 
+        // Windows records, per app, when it started and stopped using the camera
+        // (the data behind its own camera privacy indicator). Start later than
+        // stop means that app is using the camera right now.
+        static bool CameraInUse()
+        {
+            try
+            {
+                using (RegistryKey root = Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam"))
+                {
+                    if (root == null) return false;
+                    if (AnyAppUsing(root)) return true;
+                    using (RegistryKey desktopApps = root.OpenSubKey("NonPackaged"))
+                    {
+                        if (desktopApps != null && AnyAppUsing(desktopApps)) return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        static bool AnyAppUsing(RegistryKey parent)
+        {
+            foreach (string name in parent.GetSubKeyNames())
+            {
+                if (name == "NonPackaged") continue;
+                try
+                {
+                    using (RegistryKey k = parent.OpenSubKey(name))
+                    {
+                        if (k == null) continue;
+                        object start = k.GetValue("LastUsedTimeStart");
+                        object stop = k.GetValue("LastUsedTimeStop");
+                        if (start is long && stop is long && (long)start > 0 && (long)start > (long)stop)
+                            return true;
+                    }
+                }
+                catch { }
+            }
+            return false;
+        }
+
         void Tick()
         {
             if (needRebuild)
@@ -445,7 +530,12 @@ namespace TopBar
                 return;
             }
             string t = BuildText();
-            foreach (BarForm b in bars) b.SetText(t);
+            bool cam = settings.ShowCamera && CameraInUse();
+            foreach (BarForm b in bars)
+            {
+                b.SetText(t);
+                b.SetCamera(settings.ShowCamera, cam);
+            }
         }
 
         protected override void ExitThreadCore()

@@ -3,7 +3,7 @@
 A tiny macOS-style top bar for Windows that always shows the **date, time and battery level**, so you never have to hover an auto-hidden taskbar to see them.
 
 ```
-Monday, November 23, 2026  •  21:59  •  ⚡ 87%
+Monday, November 23, 2026  •  21:59  •  ⚡ 87%  •  🟢 Camera
 ```
 
 ## Features
@@ -15,11 +15,14 @@ Monday, November 23, 2026  •  21:59  •  ⚡ 87%
 - Steps behind full-screen apps and videos, and comes back afterwards
 - Handles monitors being plugged in or removed, and wake from sleep
 - Tiny: a single C# file, no installer, no dependencies, negligible CPU and RAM
+- **Camera status**: a green dot when any app is using the camera, red when it is not (can be hidden)
 - On desktops without a battery, the battery part is simply left out
 
 ## How it works
 
 TopBar registers itself as a Windows **AppBar** (the same mechanism the taskbar uses) through `SHAppBarMessage`. Windows then treats the strip at the top of each monitor as reserved, so the usable desktop area shrinks by the height of the bar.
+
+The camera status reads the same per-app "last used start/stop" records that Windows keeps for its own camera privacy indicator (`HKCU\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam`). If an app has started using the camera and has not stopped, the dot turns green. No admin rights are needed. This is internal Windows bookkeeping rather than a documented API, so it could change in a future Windows update.
 
 ## Requirements
 
@@ -54,6 +57,7 @@ Right-click the tray icon:
 | --- | --- |
 | 24-hour clock / 12-hour clock | Switches the time format (`21:59` or `9:59 PM`) |
 | Show time | Shows or hides the time, leaving only date and battery |
+| Show camera status | Shows or hides the green/red camera dot |
 | Start with Windows | Turns autostart on or off |
 | Exit | Closes the bar and gives the reserved screen space back |
 
